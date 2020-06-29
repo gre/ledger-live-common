@@ -74,6 +74,13 @@ async function bitcoinBuildTransaction({
     }
   }
 
+  if (utxoStrategy.addInputs) {
+    for (const { hash, index, sequence } of utxoStrategy.addInputs) {
+      log("bitcoin", `addInput ${hash}@${index} ${sequence}`);
+      await transactionBuilder.addInput(hash, index, sequence);
+    }
+  }
+
   if (!transaction.useAllAmount) {
     if (!transaction.amount) throw new Error("amount is missing");
     const amount = await bigNumberToLibcoreAmount(
@@ -86,10 +93,13 @@ async function bitcoinBuildTransaction({
     if (isCancelled()) return;
   }
 
-  await transactionBuilder.pickInputs(
-    utxoStrategy.strategy,
-    0 /* not used, out of int32 range issue. patched in signature time. */
-  );
+  if (!utxoStrategy.disablePickInputs) {
+    await transactionBuilder.pickInputs(
+      utxoStrategy.strategy,
+      0 /* not used, out of int32 range issue. patched in signature time. */
+    );
+  }
+
   if (isCancelled()) return;
 
   await transactionBuilder.setFeesPerByte(fees);

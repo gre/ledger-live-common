@@ -60,7 +60,7 @@ export async function parseBitcoinOutput(
     }
   }
   const value = await libcoreAmountToBigNumber(await output.getValue());
-  const rbf = await output.isReplaceable();
+  const rbf = true; // await output.isReplaceable();
   return { hash, outputIndex, blockHeight, address, path, value, rbf };
 }
 

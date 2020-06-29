@@ -24,9 +24,21 @@ const options = [
     desc: "exclude utxo by their txhash@index (example: -E hash@3 -E hash@0)",
   },
   {
+    name: "addInputs",
+    alias: "I",
+    type: String,
+    multiple: true,
+    desc: "explicitly adding utxo with txhash@index@sequence",
+  },
+  {
     name: "rbf",
     type: Boolean,
     desc: "enable replace-by-fee",
+  },
+  {
+    name: "disablePickInputs",
+    type: Boolean,
+    desc: "disable the mecanism of picking utxos",
   },
   {
     name: "bitcoin-pick-strategy",
@@ -46,6 +58,25 @@ function inferTransactions(
   );
   return transactions.map(({ transaction }) => {
     invariant(transaction.family === "bitcoin", "bitcoin family");
+    let addInputs;
+    if (opts.addInputs && opts.addInputs.length > 0) {
+      addInputs = opts.addInputs.map((str) => {
+        const [hash, index, sequence] = str.split("@");
+        invariant(
+          hash && index && !isNaN(index),
+          "invalid format for --addInputs (-I)"
+        );
+        invariant(
+          sequence && !isNaN(sequence),
+          "invalid format for --addInputs (-I) (sequence not an int?)"
+        );
+        return {
+          hash,
+          index: parseInt(index, 10),
+          sequence: parseInt(sequence, 10),
+        };
+      });
+    }
     return {
       ...transaction,
       feePerByte,
@@ -53,6 +84,8 @@ function inferTransactions(
       utxoStrategy: {
         strategy: bitcoinPickingStrategy[opts["bitcoin-pick-strategy"]] || 0,
         pickUnconfirmedRBF: opts.pickUnconfirmedRBF || false,
+        disablePickInputs: opts.disablePickInputs || false,
+        addInputs,
         excludeUTXOs: (opts.excludeUTXO || []).map((str) => {
           const [hash, index] = str.split("@");
           invariant(

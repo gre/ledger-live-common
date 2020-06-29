@@ -84,6 +84,11 @@ declare class CoreBitcoinLikeOperation {
 
 declare class CoreBitcoinLikeTransactionBuilder {
   wipeToAddress(address: string): Promise<void>;
+  addInput(
+    transactionHash: string,
+    index: number,
+    sequence: number
+  ): Promise<void>;
   sendToAddress(amount: CoreAmount, recipient: string): Promise<void>;
   excludeUtxo(transactionHash: string, outputIndex: number): Promise<void>;
   pickInputs(number, number): Promise<void>;
@@ -182,6 +187,12 @@ export type BitcoinPickingStrategy = $Values<typeof bitcoinPickingStrategy>;
 export type UtxoStrategy = {
   strategy: BitcoinPickingStrategy,
   pickUnconfirmedRBF: boolean,
+  addInputs?: Array<{
+    hash: string,
+    index: number,
+    sequence: number,
+  }>,
+  disablePickInputs?: boolean,
   excludeUTXOs: Array<{
     hash: string,
     outputIndex: number,
@@ -269,6 +280,7 @@ export const reflect = (declare: (string, Spec) => void) => {
         params: ["Amount"],
       },
       excludeUtxo: {},
+      addInput: {},
       pickInputs: {},
       setFeesPerByte: {
         params: ["Amount"],
