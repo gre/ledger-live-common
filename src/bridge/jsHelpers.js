@@ -17,6 +17,7 @@ import {
   derivationModeSupportsIndex,
   getMandatoryEmptyAccountSkip,
   getDerivationModeStartsAt,
+  walletDerivation,
 } from "../derivation";
 import {
   getAccountPlaceholderName,
@@ -116,13 +117,13 @@ export const makeScanAccounts = (
 
     let newAccountCount = 0;
 
-    async function stepAddress(
+    async function stepAddress({
       index,
-      { address, path: freshAddressPath },
+      result: { address, path: freshAddressPath },
       derivationMode,
       shouldSkipEmpty,
-      seedIdentifier
-    ): { account?: Account, complete?: boolean } {
+      seedIdentifier,
+    }): { account?: Account, complete?: boolean } {
       const accountId = `js:2:${currency.id}:${address}:${derivationMode}`;
       const accountShape: Account = await getAccountShape(
         {
@@ -189,7 +190,7 @@ export const makeScanAccounts = (
               blockHeight: 0,
               ...accountShape,
             };
-            return { account, complete: true };
+            return { result: account, complete: true };
           }
           newAccountCount++;
         }
@@ -230,7 +231,7 @@ export const makeScanAccounts = (
         blockHeight: 0,
         ...accountShape,
       };
-      return { account };
+      return { result: account };
     }
 
     async function main() {
@@ -240,6 +241,14 @@ export const makeScanAccounts = (
         transport = await open(deviceId);
         const derivationModes = getDerivationModesForCurrency(currency);
         for (const derivationMode of derivationModes) {
+          walletDerivation({
+            currency,
+            derivationMode,
+            derivateAddress: (opt) =>
+              defer(() => from(getAddress(transport, opt))),
+            stepAddress: (input) => from(stepAddress(input)),
+          });
+          /*
           const path = getSeedIdentifierDerivation(currency, derivationMode);
 
           let result;
@@ -302,6 +311,7 @@ export const makeScanAccounts = (
               break;
             }
           }
+          */
         }
         o.complete();
       } catch (e) {

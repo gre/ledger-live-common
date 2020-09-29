@@ -1,8 +1,13 @@
 // @flow
 import invariant from "invariant";
+import { defer, of, range } from "rxjs";
+import { catchError, switchMap, concatMap, takeUntil } from "rxjs/operators";
+import { log } from "@ledgerhq/logs";
+import { TransportStatusError, UserRefusedAddress } from "@ledgerhq/errors";
 import type { CryptoCurrency, CryptoCurrencyConfig } from "./types";
 import { getCryptoCurrencyById } from "./currencies";
 import { getEnv } from "./env";
+import type { GetAddressOptions, Result } from "./hw/getAddress/types";
 
 type LibcoreConfig = {
   [_: string]: mixed,
@@ -393,3 +398,161 @@ export const getDerivationModesForCurrency = (
   }
   return all;
 };
+
+export type StepAddressInput = {
+  index: number,
+  result: Result,
+  derivationMode: DerivationMode,
+  shouldSkipEmpty: boolean,
+  seedIdentifier: string,
+};
+
+export type WalletDerivationInput<R> = {
+  currency: CryptoCurrency,
+  derivationMode: DerivationMode,
+  derivateAddress: (GetAddressOptions) => Observable<Result>,
+  stepAddress: (StepAddressInput) => Observable<{
+    result?: R,
+    complete?: boolean,
+  }>,
+};
+
+export function walletDerivation<R>({
+  currency,
+  derivationMode,
+  derivateAddress,
+  stepAddress,
+}: WalletDerivationInput<R>): Observable<R> {
+  const path = getSeedIdentifierDerivation(currency, derivationMode);
+
+  return defer(() =>
+    derivateAddress({
+      currency,
+      path,
+      derivationMode,
+    }).pipe(
+      catchError((e) => {
+        if (
+          e instanceof TransportStatusError ||
+          e instanceof UserRefusedAddress
+        ) {
+          log("scanAccounts", "ignore derivationMode=" + derivationMode);
+        }
+        return of();
+      })
+    )
+  ).pipe(
+    switchMap((result) => {
+      const seedIdentifier = result.publicKey;
+
+      let emptyCount = 0;
+      const mandatoryEmptyAccountSkip = getMandatoryEmptyAccountSkip(
+        derivationMode
+      );
+      const derivationScheme = getDerivationScheme({
+        derivationMode,
+        currency,
+      });
+      const stopAt = isIterableDerivationMode(derivationMode) ? 255 : 1;
+      const startsAt = getDerivationModeStartsAt(derivationMode);
+      return range(startsAt, stopAt - startsAt).pipe(
+        concatMap((index) => {
+          if (!derivationModeSupportsIndex(derivationMode, index)) {
+            return of();
+          }
+          const freshAddressPath = runDerivationScheme(
+            derivationScheme,
+            currency,
+            { account: index }
+          );
+
+          return derivateAddress({
+            currency,
+            path: freshAddressPath,
+            derivationMode,
+          }).pipe(concatMap((result) => ({ result, index })));
+        }),
+        concatMap(({ result, index }) =>
+          stepAddress({
+            index,
+            result,
+            derivationMode,
+            shouldSkipEmpty: emptyCount < mandatoryEmptyAccountSkip,
+            seedIdentifier,
+          })
+        ),
+        takeUntil((r) => r.complete), // FIXME
+        concatMap((e) => (e.result ? of(e.result) : of()))
+      );
+    })
+  );
+
+  /*
+  return Observable.create((o) => {
+    async function main() {
+      let result;
+      try {
+        result = await getAddress(transport, {
+          currency,
+          path,
+          derivationMode,
+        });
+      } catch (e) {
+        // feature detect any denying case that could happen
+        if (
+          e instanceof TransportStatusError ||
+          e instanceof UserRefusedAddress
+        ) {
+          log("scanAccounts", "ignore derivationMode=" + derivationMode);
+        }
+      }
+      if (!result) return;
+
+      const seedIdentifier = result.publicKey;
+
+      let emptyCount = 0;
+      const mandatoryEmptyAccountSkip = getMandatoryEmptyAccountSkip(
+        derivationMode
+      );
+      const derivationScheme = getDerivationScheme({
+        derivationMode,
+        currency,
+      });
+      const stopAt = isIterableDerivationMode(derivationMode) ? 255 : 1;
+      const startsAt = getDerivationModeStartsAt(derivationMode);
+      for (let index = startsAt; index < stopAt; index++) {
+        if (!derivationModeSupportsIndex(derivationMode, index)) continue;
+        const freshAddressPath = runDerivationScheme(
+          derivationScheme,
+          currency,
+          {
+            account: index,
+          }
+        );
+        const result = await getAddress(transport, {
+          currency,
+          path: freshAddressPath,
+          derivationMode,
+        });
+        const r = await stepAddress({
+          index,
+          result,
+          derivationMode,
+          shouldSkipEmpty: emptyCount < mandatoryEmptyAccountSkip,
+          seedIdentifier,
+        });
+        if (r.result) {
+          o.next(r.result);
+        } else {
+          emptyCount++;
+        }
+        if (r.complete) {
+          break;
+        }
+      }
+    }
+
+    main();
+  });
+  */
+}
